@@ -41,11 +41,12 @@
       <WholeProgramOptimization Condition="'$(Configuration)'=='Release'">true</WholeProgramOptimization>
     </ClCompile>
     <Link>
-      <SubSystem>Windows</SubSystem><GenerateManifest>false</GenerateManifest><GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>comctl32.lib;comdlg32.lib;user32.lib;gdi32.lib;kernel32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration Condition="'$(Configuration)'=='Release'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <ResourceCompile><AdditionalIncludeDirectories>$(ProjectDir)resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+    <Manifest><AdditionalManifestFiles>$(ProjectDir)resources\DefragForge.manifest</AdditionalManifestFiles></Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\BuildTarget.h" /><ClInclude Include="include\Engine.h" />
