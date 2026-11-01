@@ -5,6 +5,8 @@
 #include <commdlg.h>
 #include <process.h>
 #include <algorithm>
+#include <cstdio>
+#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -92,11 +94,14 @@ void RefreshButtons() {
     nd::VolumeInfo* volume = SelectedVolume();
     bool ntfs = volume && volume->ntfs;
     bool hddOkay = volume && volume->media != nd::MediaSsd;
+    wchar_t windowsDirectory[MAX_PATH] = {};
+    GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
+    bool systemVolume = volume && towupper(volume->root[0]) == towupper(windowsDirectory[0]);
     bool confirmed = SendMessageW(app.confirm, BM_GETCHECK, 0, 0) == BST_CHECKED;
     EnableWindow(app.drives, !busy);
     EnableWindow(app.analyze, !busy && ntfs);
     EnableWindow(app.preview, !busy && app.hasScan);
-    EnableWindow(app.optimize, !busy && app.hasScan && ntfs && hddOkay && confirmed);
+    EnableWindow(app.optimize, !busy && app.hasScan && ntfs && hddOkay && !systemVolume && confirmed);
     EnableWindow(app.cancel, busy);
     EnableWindow(app.exportButton, !busy && app.hasScan);
     EnableWindow(app.confirm, !busy && hddOkay && ntfs);
@@ -223,6 +228,9 @@ void PreviewPlan() {
 void StartOptimization() {
     nd::VolumeInfo* volume = SelectedVolume();
     if (!volume || volume->media == nd::MediaSsd) return;
+    wchar_t windowsDirectory[MAX_PATH] = {};
+    GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
+    if (towupper(volume->root[0]) == towupper(windowsDirectory[0])) return;
     const wchar_t* text =
         L"EXPERIMENTAL HDD RELOCATION\n\n"
         L"This changes NTFS allocation on the selected drive. Files currently being written "
@@ -343,7 +351,7 @@ void CreateUi() {
         column.iSubItem = i;
         ListView_InsertColumn(app.files, i, &column);
     }
-    app.log = AddControl(WC_EDITW, L"DefragForge ready. Analysis is read-only.",
+    app.log = AddControl(WC_EDITW, L"DefragForge ready. Analysis is read-only.\r\n",
         ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP, IdLog, WS_EX_CLIENTEDGE);
     app.status = AddControl(STATUSCLASSNAMEW, L"Ready", SBARS_SIZEGRIP, IdStatus);
     app.progress = AddControl(PROGRESS_CLASSW, L"", PBS_SMOOTH, 0);

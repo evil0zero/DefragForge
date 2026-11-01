@@ -2,6 +2,7 @@
 #include <winioctl.h>
 #include <algorithm>
 #include <cwchar>
+#include <cwctype>
 #include <cstring>
 #include <cstdio>
 #include <sstream>
@@ -317,6 +318,13 @@ void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) 
             break;
         }
     if (!ntfs) { result.lastError = ERROR_NOT_SUPPORTED; observer.Message(L"NTFS is required; confirmed SSDs are blocked."); return; }
+    wchar_t windowsDirectory[MAX_PATH] = {};
+    GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
+    if (towupper(root[0]) == towupper(windowsDirectory[0])) {
+        result.lastError = ERROR_ACCESS_DENIED;
+        observer.Message(L"Experimental relocation on the running Windows system volume is disabled.");
+        return;
+    }
     Handle volume(CreateFileW(VolumePath(root).c_str(), GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL));
     if (!volume.Valid()) { result.lastError = GetLastError(); observer.Message(L"Administrator privileges required for file relocation."); return; }

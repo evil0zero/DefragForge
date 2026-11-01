@@ -75,6 +75,8 @@ and SDK support determine builds, not the marketing edition.
 - Unknown/virtual/RAID storage characteristics are **not** fully detectable; user confirmation
   isn't proof. Never run a relocation pass on flash media, storage pools, critical volumes,
   BitLocker volumes that have not been separately validated, or valuable production systems.
+- Relocation of the currently running Windows system volume is disabled. Use a disposable,
+  non-system NTFS HDD volume for early validation.
 - The first engine **does not guarantee a lower fragmentation score**. A move can fail after
   an earlier chunk succeeds; immediately rerun analysis to measure the result.
 - The basic score is a deterministic heuristic, not trained machine learning. There are
