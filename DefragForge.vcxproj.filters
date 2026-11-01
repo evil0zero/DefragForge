@@ -9,9 +9,11 @@
     <ClCompile Include="src\Main.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\Engine.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\Planner.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\SsdPolicy.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="include\BuildTarget.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="include\Engine.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="include\Planner.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="include\SsdPolicy.h"><Filter>Header Files</Filter></ClInclude>
     <ResourceCompile Include="resources\DefragForge.rc"><Filter>Resources</Filter></ResourceCompile>
     <None Include="resources\DefragForge.manifest"><Filter>Resources</Filter></None>
   </ItemGroup>

@@ -142,6 +142,7 @@ bool FindFreeRun(HANDLE volume, unsigned long long needed, unsigned long long& f
         if (end >= realStart + static_cast<unsigned long long>(data->BitmapSize.QuadPart)) return false;
         position = end;
     }
+    return false;
 }
 
 void ReadAllocationSamples(HANDLE volume, ScanResult& result, Observer& observer) {
@@ -234,9 +235,144 @@ void ScanDirectory(const std::wstring& directory, Observer& observer, ScanResult
 
 bool FileScoreDescending(const FileRecord& a, const FileRecord& b) { return a.score > b.score; }
 
+bool WindowsVersion(unsigned int& major, unsigned int& minor) {
+    OSVERSIONINFOW info = {};
+    info.dwOSVersionInfoSize = sizeof(info);
+    typedef LONG (WINAPI *RtlGetVersionFunction)(OSVERSIONINFOW*);
+    HMODULE library = GetModuleHandleW(L"ntdll.dll");
+    RtlGetVersionFunction getVersion = library ? reinterpret_cast<RtlGetVersionFunction>(
+        GetProcAddress(library, "RtlGetVersion")) : NULL;
+    if (getVersion && getVersion(&info) == 0) {
+        major = info.dwMajorVersion;
+        minor = info.dwMinorVersion;
+        return true;
+    }
+    if (GetVersionExW(&info)) {
+        major = info.dwMajorVersion;
+        minor = info.dwMinorVersion;
+        return true;
+    }
+    major = 0;
+    minor = 0;
+    return false;
+}
+
+bool DefragExecutable(std::wstring& executable) {
+    wchar_t directory[MAX_PATH] = {};
+    UINT count = GetSystemDirectoryW(directory, MAX_PATH);
+    if (count == 0 || count >= MAX_PATH) return false;
+    executable = std::wstring(directory) + L"\\defrag.exe";
+    DWORD attributes = GetFileAttributesW(executable.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+bool IsSystemDrive(const std::wstring& root) {
+    wchar_t directory[MAX_PATH] = {};
+    return GetWindowsDirectoryW(directory, MAX_PATH) != 0 && !root.empty() &&
+        towupper(root[0]) == towupper(directory[0]);
+}
+
+// Defrag /L output is captured from an inherited pipe. The helper is always the
+// OS-installed system executable and the drive argument is a validated letter.
+void RunRetrimProcess(const std::wstring& root, Observer& observer, ScanResult& result) {
+    if (root.size() != 3 || !iswalpha(root[0]) || root[1] != L':' || root[2] != L'\\') {
+        result.lastError = ERROR_INVALID_PARAMETER;
+        return;
+    }
+    std::wstring executable;
+    if (!DefragExecutable(executable)) {
+        result.lastError = ERROR_FILE_NOT_FOUND;
+        observer.Message(L"Windows defrag.exe was not found in the system directory.");
+        return;
+    }
+    SECURITY_ATTRIBUTES security = {};
+    security.nLength = sizeof(security);
+    security.bInheritHandle = TRUE;
+    HANDLE readPipe = NULL, writePipe = NULL;
+    if (!CreatePipe(&readPipe, &writePipe, &security, 0)) {
+        result.lastError = GetLastError();
+        return;
+    }
+    SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
+    Handle readGuard(readPipe), writeGuard(writePipe);
+    Handle nullInput(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
+    STARTUPINFOW startup = {};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = nullInput.Valid() ? nullInput.Get() : GetStdHandle(STD_INPUT_HANDLE);
+    startup.hStdOutput = writePipe;
+    startup.hStdError = writePipe;
+    PROCESS_INFORMATION process = {};
+    std::wstring command = L"\"" + executable + L"\" " + root.substr(0, 2) + L" /L /U /V";
+    std::vector<wchar_t> arguments(command.begin(), command.end());
+    arguments.push_back(0);
+    if (!CreateProcessW(executable.c_str(), &arguments[0], NULL, NULL, TRUE,
+        CREATE_NO_WINDOW, NULL, NULL, &startup, &process)) {
+        result.lastError = GetLastError();
+        observer.Message(L"Unable to start Windows ReTrim. Try running as administrator.");
+        return;
+    }
+    Handle threadGuard(process.hThread), processGuard(process.hProcess);
+    // Output is polled; parent pipe handles close on return.
+    observer.Message(L"Windows is processing SSD ReTrim. This does not relocate file clusters.");
+    unsigned int reported = 0;
+    std::string pending;
+    bool ended = false;
+    while (!ended) {
+        if (observer.Cancelled()) {
+            result.cancelled = true;
+            result.lastError = ERROR_CANCELLED;
+            TerminateProcess(process.hProcess, ERROR_CANCELLED);
+            observer.Message(L"ReTrim helper cancellation requested; Windows may finish already submitted work.");
+        }
+        DWORD available = 0;
+        if (PeekNamedPipe(readPipe, NULL, 0, NULL, &available, NULL) && available > 0) {
+            char chunk[2048];
+            DWORD count = 0;
+            DWORD length = available < sizeof(chunk) ? available : sizeof(chunk);
+            if (ReadFile(readPipe, chunk, length, &count, NULL) && count) {
+                pending.append(chunk, count);
+                size_t lineEnd = 0;
+                while ((lineEnd = pending.find_first_of("\r\n")) != std::string::npos) {
+                    std::string line = pending.substr(0, lineEnd);
+                    pending.erase(0, lineEnd + 1);
+                    if (!line.empty() && reported < 100) {
+                        int characters = MultiByteToWideChar(CP_OEMCP, 0, line.c_str(),
+                            static_cast<int>(line.size()), NULL, 0);
+                        if (characters > 0) {
+                            std::vector<wchar_t> output(characters);
+                            MultiByteToWideChar(CP_OEMCP, 0, line.c_str(),
+                                static_cast<int>(line.size()), &output[0], characters);
+                            observer.Message(std::wstring(output.begin(), output.end()));
+                            ++reported;
+                        }
+                    }
+                }
+                if (pending.size() > 8192) pending.clear();
+            }
+        }
+        ended = WaitForSingleObject(process.hProcess, 100) == WAIT_OBJECT_0;
+    }
+    DWORD exitCode = 0;
+    if (!GetExitCodeProcess(process.hProcess, &exitCode)) {
+        if (result.lastError == ERROR_SUCCESS) result.lastError = GetLastError();
+    } else if (!result.cancelled && exitCode != 0) {
+        result.lastError = ERROR_GEN_FAILURE;
+        wchar_t message[100] = {};
+        _snwprintf(message, 99, L"Windows ReTrim failed, defrag.exe exit code %lu.", exitCode);
+        observer.Message(message);
+    } else if (!result.cancelled) {
+        observer.Progress(100);
+        observer.Message(L"SSD ReTrim completed successfully.");
+    }
+}
+
+
 } // namespace
 
-VolumeInfo::VolumeInfo() : bytesTotal(0), bytesFree(0), clusterBytes(0), media(MediaUnknown), ntfs(false) {}
+VolumeInfo::VolumeInfo() : bytesTotal(0), bytesFree(0), clusterBytes(0), media(MediaUnknown),
+    ntfs(false), trimKnown(false), trimEnabled(false), retrimSupported(false) {}
 ScanResult::ScanResult() : scanned(0), fragmented(0), inaccessible(0), bytesScanned(0),
     volumeClusters(0), freeClusters(0), moved(0), moveFailed(0), lastError(ERROR_SUCCESS),
     cancelled(false), ntfs(false), volumeBitmapAvailable(false) {}
@@ -270,13 +406,30 @@ std::vector<VolumeInfo> GetLocalVolumes() {
             NULL, OPEN_EXISTING, 0, NULL));
         if (handle.Valid()) {
             STORAGE_PROPERTY_QUERY query = {};
-            query.PropertyId = static_cast<STORAGE_PROPERTY_ID>(7);
             query.QueryType = PropertyStandardQuery;
-            struct SeekPenalty { DWORD Version; DWORD Size; BOOLEAN IncursSeekPenalty; } response = {};
+            struct DeviceFlag { DWORD Version; DWORD Size; BOOLEAN Enabled; } response = {};
             DWORD bytes = 0;
+            query.PropertyId = static_cast<STORAGE_PROPERTY_ID>(7);
             if (DeviceIoControl(handle.Get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
-                &response, sizeof(response), &bytes, NULL) && bytes >= sizeof(response))
-                entry.media = response.IncursSeekPenalty ? MediaHdd : MediaSsd;
+                &response, sizeof(response), &bytes, NULL) && bytes >= sizeof(response) &&
+                response.Size >= sizeof(response))
+                entry.media = response.Enabled ? MediaHdd : MediaSsd;
+            response = DeviceFlag();
+            query.PropertyId = static_cast<STORAGE_PROPERTY_ID>(8);
+            if (DeviceIoControl(handle.Get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query),
+                &response, sizeof(response), &bytes, NULL) && bytes >= sizeof(response) &&
+                response.Size >= sizeof(response)) {
+                entry.trimKnown = true;
+                entry.trimEnabled = response.Enabled != 0;
+            }
+        }
+        unsigned int major = 0, minor = 0;
+        WindowsVersion(major, minor);
+        entry.retrimSupported = CanRetrim(entry.ntfs, entry.media == MediaSsd,
+            entry.trimKnown, entry.trimEnabled, major, minor);
+        if (entry.retrimSupported) {
+            std::wstring executable;
+            entry.retrimSupported = DefragExecutable(executable);
         }
         volumes.push_back(entry);
     }
@@ -311,18 +464,15 @@ void Analyze(const std::wstring& root, Observer& observer, ScanResult& result) {
 
 void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) {
     std::vector<VolumeInfo> volumes = GetLocalVolumes();
-    bool ntfs = false;
+    bool eligible = false;
     for (size_t i = 0; i < volumes.size(); ++i)
         if (_wcsicmp(volumes[i].root.c_str(), root.c_str()) == 0) {
-            ntfs = volumes[i].ntfs && volumes[i].media != MediaSsd;
+            eligible = CanRelocate(volumes[i].ntfs, volumes[i].media == MediaHdd, IsSystemDrive(root));
             break;
         }
-    if (!ntfs) { result.lastError = ERROR_NOT_SUPPORTED; observer.Message(L"NTFS is required; confirmed SSDs are blocked."); return; }
-    wchar_t windowsDirectory[MAX_PATH] = {};
-    GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
-    if (towupper(root[0]) == towupper(windowsDirectory[0])) {
-        result.lastError = ERROR_ACCESS_DENIED;
-        observer.Message(L"Experimental relocation on the running Windows system volume is disabled.");
+    if (!eligible) {
+        result.lastError = ERROR_NOT_SUPPORTED;
+        observer.Message(L"Relocation requires a positively identified NTFS HDD that is not the system volume.");
         return;
     }
     Handle volume(CreateFileW(VolumePath(root).c_str(), GENERIC_READ | GENERIC_WRITE,
@@ -398,6 +548,24 @@ void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) 
     }
     observer.Message(result.cancelled ? L"Relocation cancelled; verify and re-analyze." :
         L"Relocation pass ended. Re-analyze before further optimization.");
+}
+
+void Retrim(const std::wstring& root, Observer& observer, ScanResult& result) {
+    std::vector<VolumeInfo> volumes = GetLocalVolumes();
+    bool allowed = false;
+    for (size_t i = 0; i < volumes.size(); ++i) {
+        if (_wcsicmp(volumes[i].root.c_str(), root.c_str()) == 0) {
+            allowed = volumes[i].retrimSupported;
+            break;
+        }
+    }
+    if (!allowed) {
+        result.lastError = ERROR_NOT_SUPPORTED;
+        observer.Message(L"ReTrim requires Windows 8+, a confirmed SSD, and enabled TRIM support.");
+        return;
+    }
+    if (observer.Cancelled()) { result.cancelled = true; result.lastError = ERROR_CANCELLED; return; }
+    RunRetrimProcess(root, observer, result);
 }
 
 std::wstring FormatWindowsError(DWORD code) {

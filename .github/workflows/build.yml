@@ -2,14 +2,21 @@ name: Build and test source
 on:
   push:
   pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Win32, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
-      - name: Build Win32/x64 solution (no binary release)
-        run: msbuild DefragForge.sln /m /p:Configuration=Release /p:Platform=x64 /p:DefragTarget=0x0A00 /p:DefragToolset=v143
-      - name: Run planning tests
+      - name: Build Visual Studio solution
+        run: msbuild DefragForge.sln /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:DefragTarget=0x0A00 /p:DefragToolset=v143
+      - name: Test planner and SSD safety policy
         shell: cmd
-        run: out\x64\Release\PlannerTests.exe
+        run: out\${{ matrix.platform }}\Release\PlannerTests.exe

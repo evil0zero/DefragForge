@@ -1,4 +1,5 @@
 #include "Planner.h"
+#include "SsdPolicy.h"
 #include <stdio.h>
 
 #define VERIFY(condition) do { if (!(condition)) { \
@@ -28,6 +29,17 @@ int main() {
     file.fileBytes = 12ULL * 1024 * 1024;
     file.systemFile = true;
     VERIFY(!nd::IsEligible(file, limits));
-    puts("Planner tests passed");
+    // SSD maintenance requires independent positive signals and Windows 8+.
+    VERIFY(nd::CanRetrim(true, true, true, true, 6, 2));
+    VERIFY(nd::CanRetrim(true, true, true, true, 10, 0));
+    VERIFY(!nd::CanRetrim(true, true, true, true, 6, 1));
+    VERIFY(!nd::CanRetrim(true, false, true, true, 10, 0));
+    VERIFY(!nd::CanRetrim(true, true, false, true, 10, 0));
+    VERIFY(!nd::CanRetrim(true, true, true, false, 10, 0));
+    VERIFY(!nd::CanRetrim(false, true, true, true, 10, 0));
+    VERIFY(nd::CanRelocate(true, true, false));
+    VERIFY(!nd::CanRelocate(true, false, false));
+    VERIFY(!nd::CanRelocate(true, true, true));
+    puts("Planner and SSD safety policy tests passed");
     return 0;
 }

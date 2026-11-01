@@ -3,6 +3,7 @@
 
 #include "BuildTarget.h"
 #include "Planner.h"
+#include "SsdPolicy.h"
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -29,6 +30,9 @@ struct VolumeInfo {
     unsigned long long clusterBytes;
     MediaKind media;
     bool ntfs;
+    bool trimKnown;
+    bool trimEnabled;
+    bool retrimSupported;
     VolumeInfo();
 };
 
@@ -61,6 +65,7 @@ public:
 std::vector<VolumeInfo> GetLocalVolumes();
 void Analyze(const std::wstring& root, Observer& observer, ScanResult& result);
 void Optimize(const std::wstring& root, Observer& observer, ScanResult& result);
+void Retrim(const std::wstring& root, Observer& observer, ScanResult& result);
 std::wstring FormatWindowsError(DWORD code);
 std::wstring FormatSize(unsigned long long bytes);
 bool WriteCsvReport(const std::wstring& file, const ScanResult& result);

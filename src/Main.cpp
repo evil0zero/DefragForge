@@ -20,7 +20,7 @@ enum ControlId {
     IdConfirm, IdFiles, IdLog, IdStatus, IdMap
 };
 
-enum WorkMode { ModeAnalyze, ModeOptimize };
+enum WorkMode { ModeAnalyze, ModeOptimize, ModeRetrim };
 const UINT MsgLog = WM_APP + 1;
 const UINT MsgProgress = WM_APP + 2;
 const UINT MsgFinished = WM_APP + 3;
@@ -93,18 +93,20 @@ void RefreshButtons() {
     bool busy = app.active != NULL;
     nd::VolumeInfo* volume = SelectedVolume();
     bool ntfs = volume && volume->ntfs;
-    bool hddOkay = volume && volume->media != nd::MediaSsd;
+    bool hddOkay = volume && volume->media == nd::MediaHdd;
+    bool ssdOkay = volume && volume->retrimSupported;
     wchar_t windowsDirectory[MAX_PATH] = {};
     GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
     bool systemVolume = volume && towupper(volume->root[0]) == towupper(windowsDirectory[0]);
     bool confirmed = SendMessageW(app.confirm, BM_GETCHECK, 0, 0) == BST_CHECKED;
     EnableWindow(app.drives, !busy);
     EnableWindow(app.analyze, !busy && ntfs);
-    EnableWindow(app.preview, !busy && app.hasScan);
-    EnableWindow(app.optimize, !busy && app.hasScan && ntfs && hddOkay && !systemVolume && confirmed);
+    EnableWindow(app.preview, !busy && (app.hasScan || ssdOkay));
+    EnableWindow(app.optimize, !busy && ntfs && confirmed &&
+        ((app.hasScan && hddOkay && !systemVolume) || ssdOkay));
     EnableWindow(app.cancel, busy);
     EnableWindow(app.exportButton, !busy && app.hasScan);
-    EnableWindow(app.confirm, !busy && hddOkay && ntfs);
+    EnableWindow(app.confirm, !busy && ntfs && (hddOkay || ssdOkay));
 }
 
 void SetHeadline() {
@@ -114,7 +116,17 @@ void SetHeadline() {
         info->media == nd::MediaSsd ? L"Solid-state disk" : L"Unknown media";
     std::wstring line = info->filesystem + L"  |  " + kind + L"  |  " +
         nd::FormatSize(info->bytesTotal) + L" total  |  " + nd::FormatSize(info->bytesFree) + L" free";
+    if (info->media == nd::MediaSsd) {
+        line += info->trimKnown ? (info->trimEnabled ? L"  |  TRIM enabled" : L"  |  TRIM disabled") :
+            L"  |  TRIM status unknown";
+        if (!info->retrimSupported) line += L"  |  ReTrim unavailable";
+    }
     SetWindowTextW(app.headline, line.c_str());
+    SetWindowTextW(app.optimize, info->media == nd::MediaSsd ? L"ReTrim SSD" : L"Optimize HDD");
+    const wchar_t* acknowledgment = info->media == nd::MediaSsd ?
+        L"I understand SSD ReTrim reports unused blocks to the device; it does not defragment files." :
+        L"I have a verified backup and confirm this is an HDD (required for experimental relocation).";
+    SetWindowTextW(app.confirm, acknowledgment);
     RefreshButtons();
 }
 
@@ -179,6 +191,7 @@ unsigned __stdcall Worker(void* data) {
     WorkRequest* work = static_cast<WorkRequest*>(data);
     WindowObserver observer(work);
     if (work->mode == ModeAnalyze) nd::Analyze(work->root, observer, work->result);
+    else if (work->mode == ModeRetrim) nd::Retrim(work->root, observer, work->result);
     else nd::Optimize(work->root, observer, work->result);
     PostMessageW(work->window, MsgFinished, reinterpret_cast<WPARAM>(work), 0);
     return 0;
@@ -199,11 +212,23 @@ void StartWorker(WorkMode mode) {
     app.active = request;
     app.thread = reinterpret_cast<HANDLE>(handle);
     SendMessageW(app.progress, PBM_SETPOS, 0, 0);
-    LogLine(mode == ModeAnalyze ? L"Starting read-only NTFS analysis..." : L"Beginning capped relocation pass...");
+    LogLine(mode == ModeAnalyze ? L"Starting read-only NTFS analysis..." :
+        (mode == ModeRetrim ? L"Starting Windows SSD ReTrim..." : L"Beginning capped HDD relocation pass..."));
     RefreshButtons();
 }
 
 void PreviewPlan() {
+    nd::VolumeInfo* volume = SelectedVolume();
+    if (volume && volume->media == nd::MediaSsd) {
+        const wchar_t* message = volume->retrimSupported ?
+            L"SSD maintenance: Windows ReTrim (/L).\n\nTRIM is enabled and supported by the selected drive. "
+            L"Windows will notify the device of unused filesystem blocks. No file clusters are moved. "
+            L"Windows may already perform scheduled maintenance; repeated manual ReTrim is usually unnecessary." :
+            L"SSD ReTrim is unavailable on this volume. Windows 8 or later, NTFS, confirmed "
+            L"solid-state storage, and enabled TRIM support are required.";
+        MessageBoxW(app.window, message, L"DefragForge - SSD maintenance", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
     const nd::PlanLimits limits = nd::DefaultLimits();
     unsigned int eligible = 0;
     unsigned long long eligibleBytes = 0;
@@ -227,7 +252,19 @@ void PreviewPlan() {
 
 void StartOptimization() {
     nd::VolumeInfo* volume = SelectedVolume();
-    if (!volume || volume->media == nd::MediaSsd) return;
+    if (!volume || SendMessageW(app.confirm, BM_GETCHECK, 0, 0) != BST_CHECKED) return;
+    if (volume->media == nd::MediaSsd) {
+        if (!volume->retrimSupported) return;
+        const wchar_t* message =
+            L"SSD RETRIM\n\nWindows will inform the SSD which blocks are no longer in use. "
+            L"This is not traditional defragmentation, and it should not relocate user files. "
+            L"Windows normally schedules SSD maintenance automatically.\n\n"
+            L"Run a manual ReTrim on the selected drive?";
+        if (MessageBoxW(app.window, message, L"Confirm SSD ReTrim", MB_YESNO | MB_DEFBUTTON2 |
+            MB_ICONQUESTION) == IDYES) StartWorker(ModeRetrim);
+        return;
+    }
+    if (volume->media != nd::MediaHdd) return;
     wchar_t windowsDirectory[MAX_PATH] = {};
     GetWindowsDirectoryW(windowsDirectory, MAX_PATH);
     if (towupper(volume->root[0]) == towupper(windowsDirectory[0])) return;
@@ -407,12 +444,19 @@ LRESULT CALLBACK MainProc(HWND window, UINT message, WPARAM wParam, LPARAM lPara
         WorkRequest* work = reinterpret_cast<WorkRequest*>(wParam);
         if (!app.active || work != app.active) return 0;
         bool isAnalyze = work->mode == ModeAnalyze;
+        bool isRetrim = work->mode == ModeRetrim;
         app.result = work->result;
         app.hasScan = isAnalyze && app.result.ntfs && app.result.lastError == ERROR_SUCCESS;
         if (isAnalyze) PopulateResults();
         else {
             app.hasScan = false;
-            LogLine(L"Re-analyze the drive before any additional relocation pass.");
+            ListView_DeleteAllItems(app.files);
+            InvalidateRect(app.map, NULL, TRUE);
+            if (isRetrim) {
+                const wchar_t* status = app.result.cancelled ? L"SSD ReTrim cancelled" :
+                    (app.result.lastError == ERROR_SUCCESS ? L"SSD ReTrim completed" : L"SSD ReTrim failed");
+                SendMessageW(app.status, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(status));
+            } else LogLine(L"Re-analyze the drive before any additional relocation pass.");
         }
         if (app.result.lastError != ERROR_SUCCESS) LogLine(L"Windows reported: " + nd::FormatWindowsError(app.result.lastError));
         if (app.thread) { WaitForSingleObject(app.thread, INFINITE); CloseHandle(app.thread); app.thread = NULL; }

@@ -1,6 +1,6 @@
 # DefragForge
 
-**Source-only, native Win32 NTFS analysis and experimental HDD relocation.**
+**Source-only, native Win32 NTFS analysis, experimental HDD relocation, and safe Windows SSD ReTrim.**
 
 DefragForge is a Win32 C++ workbench for examining fragmentation, ranking candidate files,
 inspecting an NTFS allocation-map sample, exporting a CSV report, and optionally performing
@@ -22,8 +22,13 @@ ship executables, drivers, or an installer.
 - Limited experimental HDD moves via documented `FSCTL_MOVE_FILE`. Conservative selection:
   only contiguous-move-eligible regular files, skipping system/reparse/compressed/sparse/
   encrypted files; max 64 MiB per file and 16 file attempts per pass.
-- SSDs that can be positively identified are blocked from relocation. **Unknown media may
-  still be an SSD**; the user must explicitly verify the physical drive type.
+- SSDs never use the manual cluster relocation engine. On Windows 8+, confirmed NTFS SSDs
+  with TRIM enabled can invoke Windows' built-in `defrag.exe X: /L /U /V` (ReTrim), with
+  live output, confirmation, and cancellation. This delegates maintenance to Windows.
+- Unknown media and failed storage capability queries block all write operations. This
+  conservatively handles USB bridges, VMs, RAID, and storage pools without reliable classification.
+- Windows 7 SSDs still permit read-only analysis, but do not expose manual ReTrim because
+  `defrag /L` is unavailable there. Windows may perform regular TRIM during file deletion.
 
 ## Building on the target Windows machine
 
@@ -65,9 +70,14 @@ and SDK support determine builds, not the marketing edition.
 
 - Analyze uses only read operations, though inspecting the full allocation map may need
   administrator privileges; normal-user analysis can be incomplete.
-- Optimize is disabled unless a successful analysis exists, the device isn't identified
-  as an SSD, and a user ticks the backup/mechanical-HDD acknowledgment. A second modal
-  confirmation is required before calling `FSCTL_MOVE_FILE`.
+- HDD relocation is disabled unless a successful analysis exists, **HDD is positively
+  identified**, the drive is not the Windows system drive, and a user confirms the backup.
+  A second modal confirmation is required before calling `FSCTL_MOVE_FILE`.
+- SSD ReTrim requires positive SSD and TRIM capability probes, NTFS, Windows 8+,
+  explicit acknowledgment, and a separate confirmation. It does not require a fragment scan.
+  Windows' native optimizer runs with the current user's privileges (administrative rights
+  are generally required). Cancelling stops the helper; already queued storage maintenance
+  may continue after the helper exits.
 - Volume handle creation for relocation requires administrator privileges; do **not**
   indiscriminately elevate the entire GUI.
 - Moves use the NTFS driver; the program never writes raw sectors. The allocation bitmap
@@ -94,7 +104,9 @@ include/BuildTarget.h      Windows compile-time feature defines
 include/Planner.h          Planner scoring/eligibility contracts
 include/Engine.h           Native engine interface and data types
 src/Planner.cpp            Scoring and conservative eligibility rules
-src/Engine.cpp             Windows NTFS reader, bitmap, CSV and experimental moves
+src/Engine.cpp             NTFS analysis, HDD moves, capability checks and native ReTrim dispatch
+include/SsdPolicy.h        Testable no-write/SSD eligibility rules
+src/SsdPolicy.cpp          Conservative cross-version optimization policy
 src/Main.cpp               Threaded native Win32 GUI and GDI visualization
 resources/                 Common Controls v6 / application manifest
 tests/                     Standalone deterministic planner tests
@@ -106,6 +118,9 @@ tests/                     Standalone deterministic planner tests
 - [FSCTL_GET_VOLUME_BITMAP](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_get_volume_bitmap)
 - [FSCTL_GET_RETRIEVAL_POINTERS](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_get_retrieval_pointers)
 - [FSCTL_MOVE_FILE](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_move_file)
+- [Windows defrag /L ReTrim](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/defrag)
+- [DEVICE_SEEK_PENALTY_DESCRIPTOR](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-device_seek_penalty_descriptor)
+- [DEVICE_TRIM_DESCRIPTOR](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ns-winioctl-device_trim_descriptor)
 - [Targeting Windows XP with MSVC](https://learn.microsoft.com/en-us/cpp/build/configuring-programs-for-windows-xp)
 
 MIT-licensed. All releases are source-only.
