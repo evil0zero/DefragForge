@@ -37,6 +37,7 @@
       <ExceptionHandling>Sync</ExceptionHandling><RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreaded</RuntimeLibrary>
       <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary>
       <Optimization Condition="'$(Configuration)'=='Release'">MaxSpeed</Optimization>
+      <WholeProgramOptimization Condition="'$(Configuration)'=='Release'">true</WholeProgramOptimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
     </ClCompile>
     <Link>
