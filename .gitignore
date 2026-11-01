@@ -1,0 +1,17 @@
+.vs/
+Debug/
+Release/
+out/
+intermediate/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.VC.opendb
+*.log
+*.obj
+*.pdb
+*.ilk
+*.tlog
+*.lastbuildstate

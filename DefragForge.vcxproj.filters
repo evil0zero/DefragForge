@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files"><UniqueIdentifier>{717278BC-8C16-437B-AACB-8C0F230FE3EA}</UniqueIdentifier></Filter>
+    <Filter Include="Header Files"><UniqueIdentifier>{DC6CFAD8-3948-4375-9CB8-48187DC88E22}</UniqueIdentifier></Filter>
+    <Filter Include="Resources"><UniqueIdentifier>{29A3CB7D-AF89-4312-9867-C94BD58F50DF}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\Main.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\Engine.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\Planner.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClInclude Include="include\BuildTarget.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="include\Engine.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="include\Planner.h"><Filter>Header Files</Filter></ClInclude>
+    <ResourceCompile Include="resources\DefragForge.rc"><Filter>Resources</Filter></ResourceCompile>
+    <None Include="resources\DefragForge.manifest"><Filter>Resources</Filter></None>
+  </ItemGroup>
+</Project>
