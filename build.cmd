@@ -24,7 +24,8 @@ if "!OSMAJOR!"=="6" (
 )
 if "!OSMAJOR!"=="10" (
     set "TARGET=0x0A00"
-    set "TOOLSET=v143"
+    rem Modern hosts use the installed Visual Studio toolset (v145 for VS 2026).
+    set "TOOLSET="
 )
 if defined DEFRAGFORGE_TARGET set "TARGET=%DEFRAGFORGE_TARGET%"
 if defined DEFRAGFORGE_TOOLSET set "TOOLSET=%DEFRAGFORGE_TOOLSET%"
@@ -37,7 +38,13 @@ if defined DEFRAGFORGE_PLATFORM set "ARCH=%DEFRAGFORGE_PLATFORM%"
 
 echo Host Windows version: !OSVER!
 echo Compile-time target: !TARGET!
-echo Toolset: !TOOLSET!, Architecture: !ARCH!, Configuration: !BUILD_CONFIGURATION!
+if defined TOOLSET (
+    echo Toolset override: !TOOLSET!, Architecture: !ARCH!, Configuration: !BUILD_CONFIGURATION!
+    set "TOOLSET_ARG=/p:DefragToolset=!TOOLSET!"
+) else (
+    echo Toolset: automatic based on installed Visual Studio, Architecture: !ARCH!, Configuration: !BUILD_CONFIGURATION!
+    set "TOOLSET_ARG="
+)
 
 set "MSBUILD=MSBuild.exe"
 where MSBuild.exe >nul 2>&1
@@ -49,7 +56,7 @@ if errorlevel 1 (
         exit /b 2
     )
 )
-"!MSBUILD!" DefragForge.sln /m /t:Build /p:Configuration=!BUILD_CONFIGURATION! /p:Platform=!ARCH! /p:DefragTarget=!TARGET! /p:DefragToolset=!TOOLSET! /nologo
+"!MSBUILD!" DefragForge.sln /m /t:Build /p:Configuration=!BUILD_CONFIGURATION! /p:Platform=!ARCH! /p:DefragTarget=!TARGET! !TOOLSET_ARG! /nologo
 if errorlevel 1 (
     echo Build failed. Install the matching toolset or set DEFRAGFORGE_TOOLSET.
     exit /b 1

@@ -38,6 +38,27 @@ ship executables, drivers, or an installer.
 4. Start `out\<platform>\Release\DefragForge.exe`.
 5. For unit tests, run `out\<platform>\Release\PlannerTests.exe`.
 
+### Visual Studio 2026 / 2022
+
+Both Visual Studio projects now select a matching default toolset from the IDE's
+`VisualStudioVersion`: VS 2026 (18.0) selects `v145`, VS 2022 (17.0)
+selects `v143`. An explicit `DefragToolset` MSBuild property overrides
+both projects together; the GitHub Actions Windows 2022 build continues to
+set `/p:DefragToolset=v143`.
+
+For VS 2026 Community, open `DefragForge.sln`, choose **Release / x64**,
+and select **Rebuild Solution**. Both `DefragForge` and `PlannerTests`
+must complete. If your local project has an older property override,
+remove it or select **Retarget solution**.
+
+On modern Windows, `build.cmd` no longer forces v143: it lets the
+installed Visual Studio select its native toolset. To override manually:
+
+```bat
+set DEFRAGFORGE_TOOLSET=v145
+build.cmd
+```
+
 The batch script identifies the host's Windows version using `ver`, chooses the native
 architecture and a *default* matching toolset. Toolset detection is a best-effort mapping:
 **it cannot install missing compilers or SDKs**. Override using:
