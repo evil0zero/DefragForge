@@ -12,11 +12,12 @@ jobs:
       fail-fast: false
       matrix:
         platform: [Win32, x64]
+        configuration: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
       - name: Build Visual Studio solution
-        run: msbuild DefragForge.sln /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:DefragTarget=0x0A00 /p:DefragToolset=v143
+        run: msbuild DefragForge.sln /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /p:DefragTarget=0x0A00 /p:DefragToolset=v143
       - name: Test planner and SSD safety policy
         shell: cmd
-        run: out\${{ matrix.platform }}\Release\PlannerTests.exe
+        run: out\${{ matrix.platform }}\${{ matrix.configuration }}\PlannerTests.exe

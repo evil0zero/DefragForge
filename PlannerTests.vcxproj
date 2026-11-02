@@ -25,7 +25,7 @@
     <ClCompile><AdditionalIncludeDirectories>$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><WarningLevel>Level4</WarningLevel><RuntimeLibrary Condition="'$(Configuration)'=='Release'">MultiThreaded</RuntimeLibrary><RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebug</RuntimeLibrary></ClCompile>
     <Link><SubSystem>Console</SubSystem></Link>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="src\Planner.cpp" /><ClCompile Include="src\SsdPolicy.cpp" /><ClCompile Include="tests\PlannerTests.cpp" /></ItemGroup>
-  <ItemGroup><ClInclude Include="include\Planner.h" /><ClInclude Include="include\SsdPolicy.h" /></ItemGroup>
+  <ItemGroup><ClCompile Include="src\Planner.cpp" /><ClCompile Include="src\SsdPolicy.cpp" /><ClCompile Include="src\Analytics.cpp" /><ClCompile Include="tests\PlannerTests.cpp" /></ItemGroup>
+  <ItemGroup><ClInclude Include="include\Planner.h" /><ClInclude Include="include\SsdPolicy.h" /><ClInclude Include="include\Analytics.h" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

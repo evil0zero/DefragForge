@@ -125,7 +125,7 @@ bool Used(const std::vector<BYTE>& buffer, unsigned long long bit) {
 bool FindFreeRun(HANDLE volume, unsigned long long needed, unsigned long long& found, Observer& observer) {
     std::vector<BYTE> buffer(65536 + sizeof(VOLUME_BITMAP_BUFFER));
     unsigned long long position = 0, freeStart = 0, freeCount = 0;
-    while (!observer.Cancelled()) {
+    while (observer.WaitWhilePaused()) {
         unsigned long long realStart = 0, count = 0;
         if (!GetVolumeBitmap(volume, position, buffer, realStart, count)) return false;
         unsigned long long end = realStart + count;
@@ -146,13 +146,13 @@ bool FindFreeRun(HANDLE volume, unsigned long long needed, unsigned long long& f
 }
 
 void ReadAllocationSamples(HANDLE volume, ScanResult& result, Observer& observer) {
-    const unsigned int cells = 512;
+    const unsigned int cells = 2048;
     std::vector<unsigned long long> allocated(cells, 0), observed(cells, 0);
     std::vector<BYTE> buffer(65536 + sizeof(VOLUME_BITMAP_BUFFER));
     unsigned long long position = 0;
     unsigned long long volumeClusters = result.volumeClusters;
     if (volumeClusters == 0) return;
-    while (!observer.Cancelled()) {
+    while (observer.WaitWhilePaused()) {
         unsigned long long realStart = 0, count = 0;
         if (!GetVolumeBitmap(volume, position, buffer, realStart, count)) break;
         unsigned long long end = realStart + count;
@@ -180,13 +180,13 @@ void ReadAllocationSamples(HANDLE volume, ScanResult& result, Observer& observer
 
 void ScanDirectory(const std::wstring& directory, Observer& observer, ScanResult& result,
     unsigned long long& lastNotify) {
-    if (observer.Cancelled()) { result.cancelled = true; return; }
+    if (!observer.WaitWhilePaused()) { result.cancelled = true; return; }
     WIN32_FIND_DATAW find = {};
     const std::wstring pattern = directory + L"*";
     HANDLE search = FindFirstFileW(pattern.c_str(), &find);
     if (search == INVALID_HANDLE_VALUE) return;
     do {
-        if (observer.Cancelled()) { result.cancelled = true; break; }
+        if (!observer.WaitWhilePaused()) { result.cancelled = true; break; }
         if (wcscmp(find.cFileName, L".") == 0 || wcscmp(find.cFileName, L"..") == 0) continue;
         if (find.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
         std::wstring path = directory + find.cFileName;
@@ -225,7 +225,7 @@ void ScanDirectory(const std::wstring& directory, Observer& observer, ScanResult
         if (result.scanned - lastNotify >= 750) {
             lastNotify = result.scanned;
             wchar_t status[160];
-            _snwprintf(status, 159, L"Scanned %I64u files; fragmented: %I64u", result.scanned, result.fragmented);
+            swprintf_s(status, sizeof(status) / sizeof(status[0]), L"Scanned %I64u files; fragmented: %I64u", result.scanned, result.fragmented);
             status[159] = 0;
             observer.Message(status);
         }
@@ -243,11 +243,6 @@ bool WindowsVersion(unsigned int& major, unsigned int& minor) {
     RtlGetVersionFunction getVersion = library ? reinterpret_cast<RtlGetVersionFunction>(
         GetProcAddress(library, "RtlGetVersion")) : NULL;
     if (getVersion && getVersion(&info) == 0) {
-        major = info.dwMajorVersion;
-        minor = info.dwMinorVersion;
-        return true;
-    }
-    if (GetVersionExW(&info)) {
         major = info.dwMajorVersion;
         minor = info.dwMinorVersion;
         return true;
@@ -274,7 +269,8 @@ bool IsSystemDrive(const std::wstring& root) {
 
 // Defrag /L output is captured from an inherited pipe. The helper is always the
 // OS-installed system executable and the drive argument is a validated letter.
-void RunRetrimProcess(const std::wstring& root, Observer& observer, ScanResult& result) {
+void RunOptimizerProcess(const std::wstring& root, const wchar_t* option,
+    const wchar_t* description, Observer& observer, ScanResult& result) {
     if (root.size() != 3 || !iswalpha(root[0]) || root[1] != L':' || root[2] != L'\\') {
         result.lastError = ERROR_INVALID_PARAMETER;
         return;
@@ -304,18 +300,19 @@ void RunRetrimProcess(const std::wstring& root, Observer& observer, ScanResult& 
     startup.hStdOutput = writePipe;
     startup.hStdError = writePipe;
     PROCESS_INFORMATION process = {};
-    std::wstring command = L"\"" + executable + L"\" " + root.substr(0, 2) + L" /L /U /V";
+    std::wstring command = L"\"" + executable + L"\" " + root.substr(0, 2) +
+        L" " + option + L" /U /V";
     std::vector<wchar_t> arguments(command.begin(), command.end());
     arguments.push_back(0);
     if (!CreateProcessW(executable.c_str(), &arguments[0], NULL, NULL, TRUE,
         CREATE_NO_WINDOW, NULL, NULL, &startup, &process)) {
         result.lastError = GetLastError();
-        observer.Message(L"Unable to start Windows ReTrim. Try running as administrator.");
+        observer.Message(L"Unable to start Windows optimizer. Check administrator privileges.");
         return;
     }
     Handle threadGuard(process.hThread), processGuard(process.hProcess);
     // Output is polled; parent pipe handles close on return.
-    observer.Message(L"Windows is processing SSD ReTrim. This does not relocate file clusters.");
+    observer.Message(std::wstring(L"Windows optimizer started: ") + description);
     unsigned int reported = 0;
     std::string pending;
     bool ended = false;
@@ -324,7 +321,7 @@ void RunRetrimProcess(const std::wstring& root, Observer& observer, ScanResult& 
             result.cancelled = true;
             result.lastError = ERROR_CANCELLED;
             TerminateProcess(process.hProcess, ERROR_CANCELLED);
-            observer.Message(L"ReTrim helper cancellation requested; Windows may finish already submitted work.");
+            observer.Message(L"Windows optimizer cancellation requested; Windows may finish already submitted work.");
         }
         DWORD available = 0;
         if (PeekNamedPipe(readPipe, NULL, 0, NULL, &available, NULL) && available > 0) {
@@ -360,11 +357,11 @@ void RunRetrimProcess(const std::wstring& root, Observer& observer, ScanResult& 
     } else if (!result.cancelled && exitCode != 0) {
         result.lastError = ERROR_GEN_FAILURE;
         wchar_t message[100] = {};
-        _snwprintf(message, 99, L"Windows ReTrim failed, defrag.exe exit code %lu.", exitCode);
+        swprintf_s(message, sizeof(message) / sizeof(message[0]), L"Windows optimizer failed, defrag.exe exit code %lu.", exitCode);
         observer.Message(message);
     } else if (!result.cancelled) {
         observer.Progress(100);
-        observer.Message(L"SSD ReTrim completed successfully.");
+        observer.Message(std::wstring(description) + L" completed successfully.");
     }
 }
 
@@ -372,8 +369,10 @@ void RunRetrimProcess(const std::wstring& root, Observer& observer, ScanResult& 
 } // namespace
 
 VolumeInfo::VolumeInfo() : bytesTotal(0), bytesFree(0), clusterBytes(0), media(MediaUnknown),
-    ntfs(false), trimKnown(false), trimEnabled(false), retrimSupported(false) {}
-ScanResult::ScanResult() : scanned(0), fragmented(0), inaccessible(0), bytesScanned(0),
+    ntfs(false), trimKnown(false), trimEnabled(false), retrimSupported(false),
+    nativeHddSupported(false) {}
+ScanResult::ScanResult() : excessExtents(0), fragmentedBytes(0),
+    scanned(0), fragmented(0), inaccessible(0), bytesScanned(0),
     volumeClusters(0), freeClusters(0), moved(0), moveFailed(0), lastError(ERROR_SUCCESS),
     cancelled(false), ntfs(false), volumeBitmapAvailable(false) {}
 
@@ -425,11 +424,15 @@ std::vector<VolumeInfo> GetLocalVolumes() {
         }
         unsigned int major = 0, minor = 0;
         WindowsVersion(major, minor);
+        entry.nativeHddSupported = CanNativeHddOptimize(entry.ntfs, entry.media == MediaHdd,
+            major, minor);
         entry.retrimSupported = CanRetrim(entry.ntfs, entry.media == MediaSsd,
             entry.trimKnown, entry.trimEnabled, major, minor);
-        if (entry.retrimSupported) {
+        if (entry.retrimSupported || entry.nativeHddSupported) {
             std::wstring executable;
-            entry.retrimSupported = DefragExecutable(executable);
+            const bool available = DefragExecutable(executable);
+            entry.retrimSupported = entry.retrimSupported && available;
+            entry.nativeHddSupported = entry.nativeHddSupported && available;
         }
         volumes.push_back(entry);
     }
@@ -458,11 +461,25 @@ void Analyze(const std::wstring& root, Observer& observer, ScanResult& result) {
     unsigned long long notify = 0;
     ScanDirectory(root, observer, result, notify);
     std::sort(result.files.begin(), result.files.end(), FileScoreDescending);
+    std::vector<FragmentRecord> records;
+    records.reserve(result.files.size());
+    for (size_t i = 0; i < result.files.size(); ++i) {
+        FragmentRecord record = {};
+        record.path = result.files[i].path;
+        record.bytes = result.files[i].bytes;
+        record.extents = result.files[i].extents;
+        records.push_back(record);
+    }
+    const FragmentTotals totals = SummarizeFragments(records);
+    result.fragmentedBytes = totals.bytes;
+    result.excessExtents = totals.excessExtents;
+    result.folders = AggregateFolders(records);
     observer.Progress(100);
     observer.Message(result.cancelled ? L"Analysis cancelled." : L"Analysis completed.");
 }
 
-void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) {
+void Optimize(const std::wstring& root, Observer& observer, ScanResult& result,
+    const std::vector<std::wstring>& selectedPaths) {
     std::vector<VolumeInfo> volumes = GetLocalVolumes();
     bool eligible = false;
     for (size_t i = 0; i < volumes.size(); ++i)
@@ -481,8 +498,15 @@ void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) 
     const PlanLimits limits = DefaultLimits();
     unsigned int attempts = 0;
     for (size_t i = 0; i < result.files.size() && attempts < limits.maximumMoves; ++i) {
-        if (observer.Cancelled()) { result.cancelled = true; break; }
+        if (!observer.WaitWhilePaused()) { result.cancelled = true; break; }
         const FileRecord& record = result.files[i];
+        if (!selectedPaths.empty()) {
+            bool chosen = false;
+            for (size_t p = 0; p < selectedPaths.size(); ++p) {
+                if (_wcsicmp(selectedPaths[p].c_str(), record.path.c_str()) == 0) { chosen = true; break; }
+            }
+            if (!chosen) continue;
+        }
         Candidate candidate = {};
         candidate.fileBytes = record.bytes;
         candidate.clusterCount = record.clusters;
@@ -523,7 +547,7 @@ void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) 
         // A failure may leave prior successful chunks relocated; reanalysis is essential.
         bool success = true;
         unsigned long long movedClusters = 0;
-        while (movedClusters < clusters && !observer.Cancelled()) {
+        while (movedClusters < clusters && observer.WaitWhilePaused()) {
             MOVE_FILE_DATA move = {};
             move.FileHandle = file.Get();
             move.StartingVcn.QuadPart = static_cast<LONGLONG>(movedClusters);
@@ -540,7 +564,7 @@ void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) 
         if (success) ++result.moved;
         else ++result.moveFailed;
         wchar_t message[200];
-        _snwprintf(message, 199, L"Relocation: %u completed; %u failed (attempt %u of %u)",
+        swprintf_s(message, sizeof(message) / sizeof(message[0]), L"Relocation: %u completed; %u failed (attempt %u of %u)",
             result.moved, result.moveFailed, attempts, limits.maximumMoves);
         message[199] = 0;
         observer.Message(message);
@@ -548,6 +572,27 @@ void Optimize(const std::wstring& root, Observer& observer, ScanResult& result) 
     }
     observer.Message(result.cancelled ? L"Relocation cancelled; verify and re-analyze." :
         L"Relocation pass ended. Re-analyze before further optimization.");
+}
+
+void OptimizeWindowsHdd(const std::wstring& root, NativeHddAction action,
+    Observer& observer, ScanResult& result) {
+    const std::vector<VolumeInfo> volumes = GetLocalVolumes();
+    bool allowed = false;
+    for (size_t i = 0; i < volumes.size(); ++i) {
+        if (_wcsicmp(volumes[i].root.c_str(), root.c_str()) == 0) {
+            allowed = volumes[i].nativeHddSupported;
+            break;
+        }
+    }
+    if (!allowed) {
+        result.lastError = ERROR_NOT_SUPPORTED;
+        observer.Message(L"Windows HDD optimization requires a confirmed NTFS HDD and Windows 8+.");
+        return;
+    }
+    if (observer.Cancelled()) { result.cancelled = true; result.lastError = ERROR_CANCELLED; return; }
+    if (action == NativeConsolidate)
+        RunOptimizerProcess(root, L"/X", L"HDD free-space consolidation", observer, result);
+    else RunOptimizerProcess(root, L"/D", L"HDD defragmentation", observer, result);
 }
 
 void Retrim(const std::wstring& root, Observer& observer, ScanResult& result) {
@@ -565,7 +610,7 @@ void Retrim(const std::wstring& root, Observer& observer, ScanResult& result) {
         return;
     }
     if (observer.Cancelled()) { result.cancelled = true; result.lastError = ERROR_CANCELLED; return; }
-    RunRetrimProcess(root, observer, result);
+    RunOptimizerProcess(root, L"/L", L"SSD ReTrim", observer, result);
 }
 
 std::wstring FormatWindowsError(DWORD code) {
@@ -583,7 +628,7 @@ std::wstring FormatSize(unsigned long long bytes) {
     unsigned int unit = 0;
     while (value >= 1024 && unit < 4) { value /= 1024; ++unit; }
     wchar_t output[80];
-    _snwprintf(output, 79, L"%.1f %s", value, units[unit]);
+    swprintf_s(output, sizeof(output) / sizeof(output[0]), L"%.1f %s", value, units[unit]);
     output[79] = 0;
     return output;
 }
@@ -601,7 +646,7 @@ bool WriteCsvReport(const std::wstring& file, const ScanResult& result) {
         std::wstring escaped = item.path;
         for (size_t j = 0; j < escaped.size(); ++j) if (escaped[j] == L'"') escaped.insert(j++, 1, L'"');
         wchar_t numbers[160];
-        _snwprintf(numbers, 159, L"\",%I64u,%I64u,%u,%.3f\r\n", item.bytes, item.clusters, item.extents, item.score);
+        swprintf_s(numbers, sizeof(numbers) / sizeof(numbers[0]), L"\",%I64u,%I64u,%u,%.3f\r\n", item.bytes, item.clusters, item.extents, item.score);
         numbers[159] = 0;
         std::wstring line = L"\"" + escaped + numbers;
         int needed = WideCharToMultiByte(CP_UTF8, 0, line.c_str(), static_cast<int>(line.size()), NULL, 0, NULL, NULL);

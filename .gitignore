@@ -15,3 +15,7 @@ intermediate/
 *.ilk
 *.tlog
 *.lastbuildstate
+*.backup
+*.bak
+*.orig
+*.rej

@@ -3,6 +3,7 @@
 
 #include "BuildTarget.h"
 #include "Planner.h"
+#include "Analytics.h"
 #include "SsdPolicy.h"
 #include <windows.h>
 #include <string>
@@ -33,11 +34,15 @@ struct VolumeInfo {
     bool trimKnown;
     bool trimEnabled;
     bool retrimSupported;
+    bool nativeHddSupported;
     VolumeInfo();
 };
 
 struct ScanResult {
     std::vector<FileRecord> files;
+    std::vector<FolderStat> folders;
+    unsigned long long excessExtents;
+    unsigned long long fragmentedBytes;
     std::vector<unsigned char> allocationSamples;
     unsigned long long scanned;
     unsigned long long fragmented;
@@ -60,11 +65,16 @@ public:
     virtual bool Cancelled() const = 0;
     virtual void Message(const std::wstring& message) = 0;
     virtual void Progress(unsigned int percent) = 0;
+    virtual bool WaitWhilePaused() const { return !Cancelled(); }
 };
 
 std::vector<VolumeInfo> GetLocalVolumes();
 void Analyze(const std::wstring& root, Observer& observer, ScanResult& result);
-void Optimize(const std::wstring& root, Observer& observer, ScanResult& result);
+void Optimize(const std::wstring& root, Observer& observer, ScanResult& result,
+    const std::vector<std::wstring>& selectedPaths);
+enum NativeHddAction { NativeDefragment, NativeConsolidate };
+void OptimizeWindowsHdd(const std::wstring& root, NativeHddAction action,
+    Observer& observer, ScanResult& result);
 void Retrim(const std::wstring& root, Observer& observer, ScanResult& result);
 std::wstring FormatWindowsError(DWORD code);
 std::wstring FormatSize(unsigned long long bytes);

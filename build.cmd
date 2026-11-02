@@ -24,7 +24,6 @@ if "!OSMAJOR!"=="6" (
 )
 if "!OSMAJOR!"=="10" (
     set "TARGET=0x0A00"
-    rem Modern hosts use the installed Visual Studio toolset (v145 for VS 2026).
     set "TOOLSET="
 )
 if defined DEFRAGFORGE_TARGET set "TARGET=%DEFRAGFORGE_TARGET%"
@@ -42,7 +41,7 @@ if defined TOOLSET (
     echo Toolset override: !TOOLSET!, Architecture: !ARCH!, Configuration: !BUILD_CONFIGURATION!
     set "TOOLSET_ARG=/p:DefragToolset=!TOOLSET!"
 ) else (
-    echo Toolset: automatic based on installed Visual Studio, Architecture: !ARCH!, Configuration: !BUILD_CONFIGURATION!
+    echo Toolset: installed Visual Studio default, Architecture: !ARCH!, Configuration: !BUILD_CONFIGURATION!
     set "TOOLSET_ARG="
 )
 

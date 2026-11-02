@@ -54,7 +54,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>comctl32.lib;comdlg32.lib;user32.lib;gdi32.lib;kernel32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;comdlg32.lib;shell32.lib;user32.lib;gdi32.lib;kernel32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <LinkTimeCodeGeneration Condition="'$(Configuration)'=='Release'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <ResourceCompile><AdditionalIncludeDirectories>$(ProjectDir)resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
@@ -63,10 +63,12 @@
   <ItemGroup>
     <ClInclude Include="include\BuildTarget.h" /><ClInclude Include="include\Engine.h" />
     <ClInclude Include="include\Planner.h" /><ClInclude Include="include\SsdPolicy.h" />
+    <ClInclude Include="include\Analytics.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp" /><ClCompile Include="src\Engine.cpp" />
     <ClCompile Include="src\Planner.cpp" /><ClCompile Include="src\SsdPolicy.cpp" />
+    <ClCompile Include="src\Analytics.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resources\DefragForge.rc" />
